@@ -42,6 +42,7 @@ from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 from candidates import generate_candidates  # noqa: E402
 from evaluate import evaluate_position  # noqa: E402
 from recommend import default_baseline_position, recommend_placement  # noqa: E402
+from room_config import load_room  # noqa: E402
 from visualize import make_report_figure  # noqa: E402
 
 # 로그는 반드시 stderr로 (stdout은 MCP 통신 전용)
@@ -87,37 +88,17 @@ def _tool_guard():
 # ---------------------------------------------------------------------
 # 강의실 설정 읽기
 # ---------------------------------------------------------------------
-def load_rooms(path=ROOMS_PATH):
-    """rooms.json을 읽어 {방 이름: 설정 딕셔너리}를 돌려준다."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        raise SoundstageToolError(f"강의실 설정 파일을 찾을 수 없습니다: {path}")
-    except json.JSONDecodeError as exc:
-        raise SoundstageToolError(f"강의실 설정 파일 {path} 의 JSON 형식이 잘못되었습니다: {exc}")
-    rooms = data.get("rooms")
-    if not isinstance(rooms, dict) or not rooms:
-        raise SoundstageToolError(f"강의실 설정 파일 {path} 에 \"rooms\" 항목이 없거나 비어 있습니다.")
-    return rooms
-
-
 def get_room(room_name):
-    """방 이름으로 설정을 찾는다. 없으면 등록된 방 목록을 알려 주는 오류를 낸다."""
-    rooms = load_rooms()
-    key = str(room_name).strip()
-    if key not in rooms:
-        names = ", ".join(sorted(rooms))
-        raise SoundstageToolError(
-            f"'{room_name}' 강의실은 등록되어 있지 않습니다. 등록된 강의실: {names}"
-        )
-    room = rooms[key]
-    required = ("dimensions_m", "wall_absorption", "forbidden_zones",
-                "speaker_height_m", "min_wall_distance_m", "listening_points")
-    missing = [k for k in required if k not in room]
-    if missing:
-        raise SoundstageToolError(f"rooms.json의 '{key}' 강의실 설정에 다음 항목이 없습니다: {missing}")
-    return key, room
+    """
+    방 이름으로 설정을 찾는다. (읽기·검사는 room_config.load_room이 한다)
+    없는 방 이름이나 잘못된 값이면 한국어 오류를 AI에게 그대로 전달한다.
+    seating(좌석 배치)이 있으면 청취 지점은 거기서 자동으로 만들어진다.
+    """
+    try:
+        room = load_room(room_name, ROOMS_PATH)
+    except ValueError as exc:
+        raise SoundstageToolError(str(exc)) from exc
+    return room["room_name"], room
 
 
 def _pos(values):
