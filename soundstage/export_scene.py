@@ -7,7 +7,7 @@ Blender는 자기만의 파이썬을 따로 가지고 있어서, 우리 .venv에
   2) (blender_scene.py, Blender 파이썬) scene.json을 읽어 3D 장면을 만들고 그림을 렌더링한다.
 
 실행 방법:  python soundstage/export_scene.py
-  → soundstage/output/scene.json 저장
+  → soundstage/output/scene.json 저장 (이슈 9부터 촘촘한 격자 "field"도 함께 저장)
   → Blender를 찾으면 baseline.png, recommended.png, scene.blend 까지 만든다.
 
 Blender 위치를 직접 알려 주고 싶으면 환경변수 BLENDER_PATH에 blender.exe 경로를 넣는다.
@@ -58,7 +58,41 @@ def _placement(result):
     }
 
 
-def build_scene_dict(room, rec_result):
+def build_field_dict(room, rec_result, step=0.25, zone=None):
+    """
+    (이슈 9) 촘촘한 격자로 기준·추천 배치의 dB 지도를 계산해 scene.json의 "field" 항목을 만든다.
+
+    zone이 None이면 좌석 12곳을 감싸는 청취 구역 (x 1~9, y 2~7 m)을 쓴다.
+    반환 키: xs, ys, height, zone, step,
+             baseline_levels, recommended_levels  ← [[...], ...] 2차원 목록, 모양 (len(ys), len(xs))
+             vmin, vmax                           ← 두 지도를 합친 공통 색 범위 [dB]
+    """
+    from field import evaluate_field, listening_zone, make_dense_grid
+
+    dims = tuple(room["dimensions_m"])
+    height = float(room["listening_points"][0][2])
+    if zone is None:
+        zone = listening_zone(room["listening_points"])
+    xs, ys, _ = make_dense_grid(dims, step=step, height=height, zone=zone)
+    levels = {}
+    for key, src in (("baseline_levels", "baseline"), ("recommended_levels", "best")):
+        grid = evaluate_field(dims, rec_result[src]["position"], xs, ys, height=height,
+                              absorption=room["wall_absorption"])
+        levels[key] = [_floats(row) for row in grid]
+    values = [v for key in levels for row in levels[key] for v in row]
+    return {
+        "xs": _floats(xs),
+        "ys": _floats(ys),
+        "height": height,
+        "zone": _floats(zone),
+        "step": float(step),
+        **levels,
+        "vmin": min(values),
+        "vmax": max(values),
+    }
+
+
+def build_scene_dict(room, rec_result, field=None):
     """
     방 설정과 추천 결과를 Blender가 읽을 딕셔너리 하나로 묶는다.
 
@@ -67,6 +101,8 @@ def build_scene_dict(room, rec_result):
     room : room_config.load_room()이 돌려준 방 설정 딕셔너리
     rec_result : recommend.recommend_placement()가 돌려준 결과 딕셔너리
                  (rec_result["baseline"] = 기준 배치, rec_result["best"] = 추천 배치)
+    field : (선택, 이슈 9) build_field_dict()의 결과. 주면 scene["field"]로 들어가고,
+            Blender가 연속 곡면을 그린다. 안 주면 예전과 똑같은 scene.json이 된다.
 
     반환값: json.dumps로 바로 저장할 수 있는 순수 파이썬 값(dict, list, float, str, bool)만 든 딕셔너리
     """
@@ -82,7 +118,7 @@ def build_scene_dict(room, rec_result):
                 f"청취 지점 개수({len(points)})와 다릅니다."
             )
 
-    return {
+    scene = {
         "room_name": str(room["room_name"]),
         "description": str(room.get("description", "")),
         "measured": bool(room.get("measured", False)),     # False면 실측 전 임시값이라는 뜻
@@ -93,6 +129,15 @@ def build_scene_dict(room, rec_result):
         "recommended": recommended,
         "improvement_percent": float(rec_result["improvement_percent"]),
     }
+    if field is not None:
+        # 2차원 목록의 모양이 (len(ys), len(xs))가 아니면 곡면을 만들 수 없으므로 미리 막는다
+        nx, ny = len(field["xs"]), len(field["ys"])
+        for key in ("baseline_levels", "recommended_levels"):
+            rows = field[key]
+            if len(rows) != ny or any(len(r) != nx for r in rows):
+                raise ValueError(f"field의 {key} 모양이 ({ny}, {nx})가 아닙니다.")
+        scene["field"] = field
+    return scene
 
 
 def save_scene_json(scene, path):
@@ -193,15 +238,22 @@ if __name__ == "__main__":
     rec = recommend_placement(dims, cands, listeners, absorption=room["wall_absorption"])
     print(f"계산 완료 ({time.perf_counter() - start:.1f}초)")
 
-    # 2) scene.json 저장
-    scene = build_scene_dict(room, rec)
+    # 2) 청취 구역을 0.25 m 격자로 촘촘히 계산 (Blender 연속 곡면용, 이슈 9)
+    start = time.perf_counter()
+    field = build_field_dict(room, rec, step=0.25)
+    print(f"촘촘한 격자 {len(field['xs'])} x {len(field['ys'])}점 계산 완료 "
+          f"({time.perf_counter() - start:.1f}초)")
+
+    # 3) scene.json 저장
+    scene = build_scene_dict(room, rec, field=field)
     scene_path = save_scene_json(scene, os.path.join(OUTPUT_DIR, "scene.json"))
     print(f"장면 데이터 저장: {scene_path}")
     print(f"  기준 배치 {scene['baseline']['position']}  std {scene['baseline']['std_db']:.2f} dB")
     print(f"  추천 배치 {scene['recommended']['position']}  std {scene['recommended']['std_db']:.2f} dB")
-    print(f"  개선율 {scene['improvement_percent']:.1f} %")
+    print(f"  개선율 {scene['improvement_percent']:.1f} %  (좌석 12곳 기준)")
+    print(f"  격자 색 범위 {field['vmin']:.2f} ~ {field['vmax']:.2f} dB")
 
-    # 3) Blender로 렌더링
+    # 4) Blender로 렌더링
     blender = find_blender()
     if blender is None:
         print()
