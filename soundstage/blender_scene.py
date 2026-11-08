@@ -15,6 +15,14 @@ soundstage 이슈 8 (2단계): Blender 안에서 3D 장면을 만들고 그림�
   scene.blend     : 두 장면을 함께 담은 Blender 파일
                     오른쪽 위 Outliner에서 "Baseline"/"Recommended" 컬렉션의 눈 아이콘으로 켜고 끈다
 
+scene.json에 "field"(촘촘한 격자 dB 지도, 이슈 9)가 있으면 연속 곡면도 만든다.
+  - 바닥 열지도 : 바닥 바로 위(z=0.01)의 격자 메시. 정점마다 dB를 색으로 칠해 연속된 색으로 보인다.
+  - 높이 곡면   : 같은 격자를 z = 1.0 + (dB - vmin)/(vmax - vmin) * 1.2 로 띄운 반투명 곡면.
+                  소리가 큰 곳(핫스팟)이 "봉우리"로 솟아 보인다.
+  - 청취 지점 구 : 작게 줄여서 곡면 위(자기 dB 높이)에 올려 둔다. 끄려면 --no-spheres
+
+  옵션 예:  blender --background --python blender_scene.py -- scene.json out --no-spheres
+
 좌표는 scene.json 값을 그대로 쓴다. (단위 m)
   x = 가로(왼쪽 벽 → 오른쪽), y = 앞벽(칠판, y=0) → 뒤쪽, z = 높이
 
@@ -39,6 +47,15 @@ SPEAKER_SIZE = (0.4, 0.3, 0.45)   # 스피커 상자 크기 (가로, 깊이, 높
 # 앞벽 위 간판 글자 줄들의 높이 (천장 높이 + 이 값) [m]: 앞(칠판), 제목, 설명, 색 범례, 방 이름
 SIGN_LINES = (2.55, 2.0, 1.55, 1.05, 0.6)
 
+# (이슈 9) 촘촘한 격자 곡면 설정
+FIELD_FLOOR_Z = 0.01              # 바닥 열지도 높이 [m] (바닥 z=0과 겹쳐 깜빡이지 않게 살짝 띄움)
+SURFACE_BASE_Z = 1.0              # 높이 곡면에서 가장 작은 dB(vmin)의 높이 [m]
+SURFACE_SPAN_Z = 1.2              # 가장 큰 dB(vmax)는 SURFACE_BASE_Z + 이 값 높이 [m]
+SURFACE_ALPHA = 0.6               # 높이 곡면 불투명도 (1 = 불투명)
+FIELD_SPHERE_RADIUS = 0.09        # field가 있을 때 청취 지점 구 반지름 [m] (곡면을 가리지 않게 작게)
+FIELD_LABEL_SIZE = 0.24           # field가 있을 때 dB 글자 크기 [m]
+FORBIDDEN_LABEL_Z = 1.74          # "설치 금지" 글자를 앞벽에 붙일 높이 [m] (dB 글자·곡면보다 위, 기준 스피커보다 아래)
+
 # 한글 글꼴 (Windows 기본 "맑은 고딕"). 없으면 글자를 영어로 바꿔 쓴다.
 KOREAN_FONTS = (r"C:\Windows\Fonts\malgun.ttf", r"C:\Windows\Fonts\malgunbd.ttf")
 
@@ -62,6 +79,19 @@ VIRIDIS_STOPS = (
     (1.00, (0.993, 0.906, 0.144)),
 )
 
+# turbo 색표를 흉내 내는 기준 색 (0=파랑: 작게 들림 → 초록 → 노랑 → 1=빨강: 크게 들림)
+# matplotlib의 turbo 값 몇 개를 골라 적어 두고, 그 사이는 직선으로 섞는다.
+TURBO_STOPS = (
+    (0.00, (0.190, 0.072, 0.232)),
+    (0.15, (0.259, 0.420, 0.880)),
+    (0.30, (0.157, 0.737, 0.922)),
+    (0.45, (0.196, 0.949, 0.596)),
+    (0.60, (0.643, 0.988, 0.235)),
+    (0.75, (0.961, 0.773, 0.227)),
+    (0.88, (0.949, 0.408, 0.098)),
+    (1.00, (0.480, 0.016, 0.012)),
+)
+
 # 화면에 쓸 글자 (한글 글꼴이 있으면 "ko", 없으면 "en")
 TEXTS = {
     "ko": {
@@ -73,6 +103,8 @@ TEXTS = {
         "improve": "추천 배치는 기준보다 균일도 {p:.1f}% 개선",
         "current": "지금 스피커 자리 (전면 중앙 상단)",
         "legend": "구 색: {vmin:.1f} dB(보라, 작게 들림) ~ {vmax:.1f} dB(노랑, 크게 들림)",
+        "legend_field": "색·높이 = 소리 크기: {vmin:.1f} dB(파랑, 낮게) ~ {vmax:.1f} dB(빨강, 높게)",
+        "field_note": "청취 구역 {step:g} m 격자 {n}점 std {std:.2f} dB (기준 배치 {base:.2f} dB)",
         "room": "{name} 강의실",
         "temp": "  (실측 전 임시 치수)",
     },
@@ -85,6 +117,8 @@ TEXTS = {
         "improve": "Recommended is {p:.1f}% more uniform than baseline",
         "current": "Current speaker position (front center, high)",
         "legend": "Sphere color: {vmin:.1f} dB (purple, quiet) ~ {vmax:.1f} dB (yellow, loud)",
+        "legend_field": "Color/height = loudness: {vmin:.1f} dB (blue, low) ~ {vmax:.1f} dB (red, high)",
+        "field_note": "Listening zone {step:g} m grid ({n} pts) std {std:.2f} dB (baseline {base:.2f} dB)",
         "room": "Room {name}",
         "temp": "  (temporary dimensions)",
     },
@@ -122,9 +156,71 @@ def viridis(t):
     return VIRIDIS_STOPS[-1][1]
 
 
+def parse_options(argv):
+    """
+    "--" 뒤에서 scene.json·출력 폴더 다음에 오는 선택 옵션을 읽는다.
+      --no-spheres : 청취 지점 구와 dB 글자를 그리지 않는다 (곡면만 보고 싶을 때)
+    반환값: {"show_spheres": True/False}
+    """
+    rest = argv[argv.index("--") + 1:] if "--" in argv else []
+    return {"show_spheres": "--no-spheres" not in rest[2:]}
+
+
+def turbo(t):
+    """0~1 사이 값 t를 turbo 비슷한 sRGB 색 (r, g, b)로 바꾼다. (파랑 → 초록 → 노랑 → 빨강)"""
+    t = min(max(float(t), 0.0), 1.0)
+    for (t0, c0), (t1, c1) in zip(TURBO_STOPS, TURBO_STOPS[1:]):
+        if t <= t1:
+            w = (t - t0) / (t1 - t0)
+            return tuple(a + (b - a) * w for a, b in zip(c0, c1))
+    return TURBO_STOPS[-1][1]
+
+
+def surface_z(db, vmin, vmax):
+    """dB 값을 높이 곡면의 높이 z [m]로 바꾼다. vmin → 1.0 m, vmax → 2.2 m (범위 밖은 끝 값으로 자름)"""
+    t = min(max((db - vmin) / (vmax - vmin), 0.0), 1.0)
+    return SURFACE_BASE_Z + t * SURFACE_SPAN_Z
+
+
+def field_mesh_data(xs, ys, levels, vmin, vmax, z=None):
+    """
+    격자 dB 지도를 Blender 메시 재료(정점, 면, 정점 색)로 바꾼다. (bpy 없이 계산만)
+
+    xs, ys : 격자 좌표 목록,  levels : levels[j][i] = (xs[i], ys[j])의 dB
+    z      : 숫자를 주면 모든 정점을 그 높이에 둔 평면(바닥 열지도),
+             None이면 dB에 따라 높이가 달라지는 곡면(surface_z)
+    반환값 : (verts, faces, colors)
+      verts  = [(x, y, z), ...]       정점 번호 k = j * len(xs) + i
+      faces  = [(a, b, c, d), ...]    이웃한 정점 4개로 만든 사각형 면
+      colors = [(r, g, b), ...]       정점마다 sRGB 색 (turbo)
+    """
+    nx, ny = len(xs), len(ys)
+    verts, colors = [], []
+    for j in range(ny):
+        for i in range(nx):
+            db = levels[j][i]
+            verts.append((xs[i], ys[j], z if z is not None else surface_z(db, vmin, vmax)))
+            colors.append(turbo((db - vmin) / (vmax - vmin)))
+    faces = [(j * nx + i, j * nx + i + 1, (j + 1) * nx + i + 1, (j + 1) * nx + i)
+             for j in range(ny - 1) for i in range(nx - 1)]
+    return verts, faces, colors
+
+
+def field_std(levels):
+    """2차원 dB 목록 전체의 표준편차 (numpy 없이, np.std와 같은 모집단 표준편차)"""
+    values = [v for row in levels for v in row]
+    mean = sum(values) / len(values)
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+
 def color_range(scene):
-    """기준·추천 배치의 dB 값을 모두 모아 같은 색 범위(vmin, vmax)를 정한다. (두 그림 색을 공정하게 비교하려고)"""
+    """
+    기준·추천 배치의 dB 값을 모두 모아 같은 색 범위(vmin, vmax)를 정한다. (두 그림 색을 공정하게 비교하려고)
+    scene에 "field"가 있으면 격자 값(vmin, vmax)도 함께 넣는다. (구와 곡면이 같은 색 기준을 쓰도록)
+    """
     values = scene["baseline"]["levels_db"] + scene["recommended"]["levels_db"]
+    if "field" in scene:
+        values = values + [scene["field"]["vmin"], scene["field"]["vmax"]]
     vmin, vmax = min(values), max(values)
     if vmax - vmin < 1e-9:      # 모든 값이 같으면 0으로 나누지 않도록 범위를 살짝 넓힌다
         vmin, vmax = vmin - 0.5, vmax + 0.5
@@ -228,6 +324,72 @@ def _text(name, body, location, size, collection, mat, font, face_camera=None, r
     return obj
 
 
+def _field_material(name, alpha):
+    """
+    정점 색을 쓰는 재질.
+    - Workbench(기본 렌더): shading.color_type = "VERTEX"이면 메시의 활성 색 속성(정점 색)으로 칠한다.
+      정점 색이 없는 다른 물체(벽, 스피커, 글자)는 원래 재질 색(diffuse_color)으로 나온다. (Blender 5.2에서 확인)
+    - Eevee/Cycles(.blend를 열어 렌더할 때): Color Attribute 노드 → Principled BSDF의 Base Color로 연결
+    """
+    import bpy
+    mat = bpy.data.materials.new(name)
+    mat.diffuse_color = (1.0, 1.0, 1.0, alpha)
+    try:
+        mat.use_nodes = True
+    except Exception:
+        pass
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF") if nt else None
+    if bsdf is not None:
+        attr = nt.nodes.new("ShaderNodeVertexColor")    # 화면 이름: "Color Attribute"
+        attr.layer_name = "dB"
+        nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+        bsdf.inputs["Alpha"].default_value = alpha
+    if alpha < 1.0:
+        for attr_name, value in (("surface_render_method", "BLENDED"), ("blend_method", "BLEND")):
+            if hasattr(mat, attr_name):
+                try:
+                    setattr(mat, attr_name, value)
+                except Exception:
+                    pass
+    return mat
+
+
+def _field_mesh(name, verts, faces, colors, collection, mat):
+    """field_mesh_data() 결과로 메시 오브젝트를 만들고 정점 색 속성 "dB"를 입힌다."""
+    import bpy
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    # POINT = 정점마다 색 하나. 면 안쪽은 GPU가 네 꼭짓점 색을 부드럽게 섞어 칠한다 → 연속된 색
+    attr = me.color_attributes.new("dB", "FLOAT_COLOR", "POINT")
+    flat = []
+    for rgb in colors:
+        flat.extend((*(srgb_to_linear(c) for c in rgb), 1.0))   # FLOAT_COLOR는 선형 값으로 넣는다
+    attr.data.foreach_set("color", flat)
+    me.color_attributes.active_color = attr
+    for poly in me.polygons:
+        poly.use_smooth = True       # 곡면의 각진 음영을 부드럽게
+    obj = bpy.data.objects.new(name, me)
+    collection.objects.link(obj)
+    me.materials.append(mat)
+    return obj
+
+
+def build_field(scene, key, col, vmin, vmax):
+    """(이슈 9) 한 배치의 바닥 열지도와 높이 곡면을 col 컬렉션에 만든다."""
+    field = scene["field"]
+    levels = field[f"{key}_levels"]
+    xs, ys = field["xs"], field["ys"]
+
+    verts, faces, colors = field_mesh_data(xs, ys, levels, vmin, vmax, z=FIELD_FLOOR_Z)
+    _field_mesh(f"FieldFloor_{key}", verts, faces, colors, col, _field_material(f"M_FieldFloor_{key}", 1.0))
+
+    verts, faces, colors = field_mesh_data(xs, ys, levels, vmin, vmax, z=None)
+    _field_mesh(f"FieldSurface_{key}", verts, faces, colors, col,
+                _field_material(f"M_FieldSurface_{key}", SURFACE_ALPHA))
+
+
 def _new_collection(name):
     import bpy
     col = bpy.data.collections.new(name)
@@ -264,22 +426,36 @@ def build_room(scene, room_col, font, words):
     # 금지 구역: 바닥 위 반투명 회색 상자 + "설치 금지" 글자
     zone_mat = _material("M_Forbidden", COLOR_FORBIDDEN, alpha=0.45)
     text_mat = _material("M_Text", COLOR_TEXT)
-    for i, (x0, y0, x1, y1) in enumerate(scene["forbidden_zones"]):
-        _box(f"Forbidden_{i}", x0, y0, 0, x1, y1, FORBIDDEN_HEIGHT, room_col, zone_mat)
-        # 글자는 상자 윗면의 앞벽 쪽에 둔다 (뒤쪽 가장자리는 청취 지점 구에 가려지기 쉬워서)
-        _text(f"ForbiddenLabel_{i}", words["forbidden"], ((x0 + x1) / 2, y0 + (y1 - y0) * 0.3, FORBIDDEN_HEIGHT + 0.01),
-              0.25, room_col, text_mat, font, rotation=(0, 0, math.pi))   # 카메라 쪽에서 바로 읽히게 180° 돌림
-
     # 앞벽 글자: 벽면에 붙여서 방 안쪽(+y)을 보게 세운다 (x축 90° 세우고 z축 180° 돌림)
     wall_rot = (math.pi / 2, 0, math.pi)
+    for i, (x0, y0, x1, y1) in enumerate(scene["forbidden_zones"]):
+        _box(f"Forbidden_{i}", x0, y0, 0, x1, y1, FORBIDDEN_HEIGHT, room_col, zone_mat)
+        # 예전에는 글자를 상자 윗면에 눕혀 두었더니, 카메라에서 보면 바로 뒤 청취 지점(y=2)의 dB 글자와 겹쳤다.
+        # 앞벽(y=0)에 닿아 있는 구역이면 글자를 앞벽 면에 세워 붙인다. 카메라가 위에서 내려다보므로
+        # 벽의 이 높이에는 청취 지점·dB 글자·곡면이 겹쳐 보이지 않는다.
+        if y0 <= 0.01:
+            _text(f"ForbiddenLabel_{i}", words["forbidden"], ((x0 + x1) / 2, 0.02, FORBIDDEN_LABEL_Z),
+                  0.2, room_col, text_mat, font, rotation=wall_rot)
+        else:
+            _text(f"ForbiddenLabel_{i}", words["forbidden"],
+                  ((x0 + x1) / 2, y0 + (y1 - y0) * 0.3, FORBIDDEN_HEIGHT + 0.01),
+                  0.25, room_col, text_mat, font, rotation=(0, 0, math.pi))   # 카메라 쪽에서 바로 읽히게 180° 돌림
     # 글자는 앞벽 "위"에 간판처럼 띄운다. (벽면에 쓰면 앞쪽 스피커·구에 가려지기 쉬워서)
     _text("FrontLabel", words["front"], (W / 2, 0.0, H + SIGN_LINES[0]), 0.42, room_col, text_mat, font,
           rotation=wall_rot)
     return text_mat, wall_rot
 
 
-def build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin, vmax):
-    """한 배치(기준 또는 추천)의 스피커, 색칠한 청취 지점, dB 글자, 제목 글자를 col 컬렉션에 만든다."""
+def build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin, vmax, show_spheres=True):
+    """
+    한 배치(기준 또는 추천)의 스피커, 색칠한 청취 지점, dB 글자, 제목 글자를 col 컬렉션에 만든다.
+    scene에 "field"가 있으면 연속 곡면도 만들고, 청취 지점 구는 작게 줄여 곡면 위에 올린다.
+    show_spheres=False면 청취 지점 구와 dB 글자를 그리지 않는다.
+    """
+    has_field = "field" in scene
+    color_of = turbo if has_field else viridis      # 곡면이 있으면 구도 같은 turbo 색을 쓴다
+    radius = FIELD_SPHERE_RADIUS if has_field else SPHERE_RADIUS
+    label_size = FIELD_LABEL_SIZE if has_field else LABEL_SIZE
     import bpy
     W, L, H = scene["dimensions_m"]
     place = scene[key]
@@ -293,16 +469,23 @@ def build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin,
     bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=0.35, depth=0.02, location=(x, y, 0.011))
     _put(bpy.context.active_object, col, sp_mat).name = f"SpeakerFloorMark_{key}"
 
-    # 청취 지점: 구 + 위에 dB 숫자. 색은 같은 범위(vmin~vmax)로 viridis 매핑
-    for i, (pt, db) in enumerate(zip(scene["listening_points"], place["levels_db"])):
-        rgb = viridis((db - vmin) / (vmax - vmin))
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=SPHERE_RADIUS, location=pt)
+    if has_field:
+        build_field(scene, key, col, vmin, vmax)
+
+    # 청취 지점: 구 + 위에 dB 숫자. 색은 같은 범위(vmin~vmax)로 매핑
+    # field가 있으면 구를 실제 귀 높이(1.2 m) 대신 "자기 dB 높이의 곡면 위"에 올린다.
+    # (곡면이 1.0~2.2 m에 떠 있어서, 귀 높이에 두면 반투명 곡면 아래에 묻혀 잘 안 보이기 때문)
+    points = zip(scene["listening_points"], place["levels_db"]) if show_spheres else []
+    for i, (pt, db) in enumerate(points):
+        rgb = color_of((db - vmin) / (vmax - vmin))
+        loc = (pt[0], pt[1], surface_z(db, vmin, vmax) + radius) if has_field else tuple(pt)
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=radius, location=loc)
         sphere = bpy.context.active_object
         sphere.name = f"Point_{key}_{i:02d}"
         bpy.ops.object.shade_smooth()
         _put(sphere, col, _material(f"M_Point_{key}_{i:02d}", rgb))
-        _text(f"Label_{key}_{i:02d}", f"{db:.1f}", (pt[0], pt[1], pt[2] + SPHERE_RADIUS + 0.3),
-              LABEL_SIZE, col, text_mat, font, face_camera=cam)
+        _text(f"Label_{key}_{i:02d}", f"{db:.1f}", (loc[0], loc[1], loc[2] + radius + 0.22),
+              label_size, col, text_mat, font, face_camera=cam)
 
     # 앞벽 제목: 어떤 배치인지, 균일도 수치
     title = words["title"].format(label=words[key], x=x, y=y, z=z, std=place["std_db"], mn=place["min_db"])
@@ -311,6 +494,12 @@ def build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin,
         line = words["improve"].format(p=scene["improvement_percent"])
     else:
         line = words["current"]
+    if has_field:
+        # 좌석 12곳 숫자만 보여 주면 오해할 수 있어서, 촘촘한 격자로 잰 std도 함께 적는다
+        f = scene["field"]
+        line += "   |   " + words["field_note"].format(
+            step=f.get("step", 0), n=len(f["xs"]) * len(f["ys"]),
+            std=field_std(f[f"{key}_levels"]), base=field_std(f["baseline_levels"]))
     _text(f"Note_{key}", line, (W / 2, 0.0, H + SIGN_LINES[2]), 0.24, col, text_mat, font, rotation=wall_rot)
 
 
@@ -353,8 +542,11 @@ def setup_camera_and_lights(scene):
     return cam
 
 
-def setup_render(engine):
-    """렌더 설정. engine = "BLENDER_WORKBENCH"(빠름, 기본) 또는 "CYCLES"(CPU로만 계산, 예비용)."""
+def setup_render(engine, vertex_colors=False):
+    """
+    렌더 설정. engine = "BLENDER_WORKBENCH"(빠름, 기본) 또는 "CYCLES"(CPU로만 계산, 예비용).
+    vertex_colors=True면 Workbench가 정점 색(연속 곡면)으로 칠한다. 정점 색이 없는 물체는 재질 색 그대로.
+    """
     import bpy
     sc = bpy.context.scene
     sc.render.engine = engine
@@ -370,7 +562,8 @@ def setup_render(engine):
     if engine == "BLENDER_WORKBENCH":
         shading = sc.display.shading
         shading.light = "STUDIO"            # 기본 스튜디오 조명 (구가 입체로 보이게)
-        shading.color_type = "MATERIAL"     # 재질의 diffuse_color로 칠한다
+        # MATERIAL: 재질의 diffuse_color로 칠한다 / VERTEX: 정점 색이 있으면 그것으로 칠한다
+        shading.color_type = "VERTEX" if vertex_colors else "MATERIAL"
         shading.show_shadows = False        # 그림자를 켜면 간판 글자 그림자가 바닥에 비쳐 지저분하다
         shading.show_cavity = False
         shading.show_object_outline = True  # 오브젝트 테두리를 그려 모양이 잘 보이게
@@ -420,6 +613,7 @@ def main(argv):
     import bpy
 
     scene_path, out_dir = parse_args(argv)
+    options = parse_options(argv)
     with open(scene_path, encoding="utf-8") as f:
         scene = json.load(f)
     os.makedirs(out_dir, exist_ok=True)
@@ -440,19 +634,20 @@ def main(argv):
     cam = setup_camera_and_lights(scene)
     text_mat, wall_rot = build_room(scene, room_col, font, words)
     W, L, H = scene["dimensions_m"]
-    legend = words["legend"].format(vmin=vmin, vmax=vmax)
+    legend = words["legend_field" if "field" in scene else "legend"].format(vmin=vmin, vmax=vmax)
     room_line = words["room"].format(name=scene["room_name"]) + ("" if scene["measured"] else words["temp"])
     _text("Legend", legend, (W / 2, 0.0, H + SIGN_LINES[3]), 0.22, room_col, text_mat, font, rotation=wall_rot)
     _text("RoomName", room_line, (W / 2, 0.0, H + SIGN_LINES[4]), 0.22, room_col, text_mat, font, rotation=wall_rot)
     for key, col in cols.items():
-        build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin, vmax)
+        build_placement(scene, key, col, cam, font, words, text_mat, wall_rot, vmin, vmax,
+                        show_spheres=options["show_spheres"])
 
     # 4) 렌더링: Workbench가 실패하면 Cycles(CPU)로 다시 시도
     outputs = {"baseline": os.path.join(out_dir, "baseline.png"),
                "recommended": os.path.join(out_dir, "recommended.png")}
     for engine in ("BLENDER_WORKBENCH", "CYCLES"):
         try:
-            setup_render(engine)
+            setup_render(engine, vertex_colors="field" in scene)
             for key, path in outputs.items():
                 show_only(cols, key)
                 render_to(path)
